@@ -19,13 +19,19 @@
 
 package com.esotericsoftware.kryo.serializers;
 
+import com.esotericsoftware.kryo.KryoException;
 import com.esotericsoftware.kryo.KryoTestCase;
+import com.esotericsoftware.kryo.io.Input;
+import com.esotericsoftware.kryo.io.Output;
 
 import java.io.Serializable;
 import java.net.URL;
 import java.net.URLClassLoader;
 
 import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** @author Nathan Sweet */
 class JavaSerializerTest extends KryoTestCase {
@@ -53,6 +59,40 @@ class JavaSerializerTest extends KryoTestCase {
 		TestClass test = new TestClass();
 		test.intField = 54321;
 		roundTrip(139, test);
+	}
+
+	@Test
+	void testClassFilterRejectsDisallowedClass () {
+		JavaSerializer serializer = new JavaSerializer();
+		serializer.setClassFilter(type -> type != TestClass.class);
+		kryo.register(TestClass.class, serializer);
+
+		TestClass test = new TestClass();
+		test.stringField = "fubar";
+		test.intField = 54321;
+
+		Output output = new Output(1024, -1);
+		kryo.writeObject(output, test);
+
+		Input input = new Input(output.toBytes());
+		assertThrows(KryoException.class, () -> kryo.readObject(input, TestClass.class));
+	}
+
+	@Test
+	void testClassFilterAllowsClass () {
+		JavaSerializer serializer = new JavaSerializer();
+		serializer.setClassFilter(type -> true);
+		kryo.register(TestClass.class, serializer);
+
+		TestClass test = new TestClass();
+		test.stringField = "fubar";
+		test.intField = 54321;
+
+		Output output = new Output(1024, -1);
+		kryo.writeObject(output, test);
+
+		Input input = new Input(output.toBytes());
+		assertEquals(test, kryo.readObject(input, TestClass.class));
 	}
 
 	public static class TestClass implements Serializable {

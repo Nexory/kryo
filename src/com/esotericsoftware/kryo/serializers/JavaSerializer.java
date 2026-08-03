@@ -32,6 +32,7 @@ import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.ObjectStreamClass;
+import java.util.function.Predicate;
 
 /** Serializes objects using Java's built in serialization mechanism. Note that this is very inefficient and should be avoided if
  * possible.
@@ -40,6 +41,21 @@ import java.io.ObjectStreamClass;
  * @see KryoSerializable
  * @author Nathan Sweet */
 public class JavaSerializer extends Serializer {
+	private Predicate<Class> classFilter;
+
+	/** Sets an optional filter applied to each class encountered while deserializing. When set, a class for which the predicate
+	 * returns false is rejected with a {@link KryoException} before it is used, providing opt-in, defense-in-depth protection when
+	 * reading serialized data from an untrusted source. When null (the default) no filtering is applied and behavior is unchanged.
+	 * @param classFilter May be null. */
+	public void setClassFilter (Predicate<Class> classFilter) {
+		this.classFilter = classFilter;
+	}
+
+	/** @return May be null. */
+	public Predicate<Class> getClassFilter () {
+		return classFilter;
+	}
+
 	public void write (Kryo kryo, Output output, Object object) {
 		try {
 			ObjectMap graphContext = kryo.getGraphContext();
@@ -60,7 +76,7 @@ public class JavaSerializer extends Serializer {
 			ObjectMap graphContext = kryo.getGraphContext();
 			ObjectInputStream objectStream = (ObjectInputStream)graphContext.get(this);
 			if (objectStream == null) {
-				objectStream = new ObjectInputStreamWithKryoClassLoader(input, kryo);
+				objectStream = new ObjectInputStreamWithKryoClassLoader(input, kryo, classFilter);
 				graphContext.put(this, objectStream);
 			}
 			return objectStream.readObject();
@@ -75,23 +91,31 @@ public class JavaSerializer extends Serializer {
 	 * https://issues.apache.org/jira/browse/GROOVY-1627 */
 	private static class ObjectInputStreamWithKryoClassLoader extends ObjectInputStream {
 		private final Kryo kryo;
+		private final Predicate<Class> classFilter;
 
-		ObjectInputStreamWithKryoClassLoader (InputStream in, Kryo kryo) throws IOException {
+		ObjectInputStreamWithKryoClassLoader (InputStream in, Kryo kryo, Predicate<Class> classFilter) throws IOException {
 			super(in);
 			this.kryo = kryo;
+			this.classFilter = classFilter;
 		}
 
 		protected Class resolveClass (ObjectStreamClass type) {
+			Class resolved;
 			try {
-				return Class.forName(type.getName(), false, kryo.getClassLoader());
-			} catch (ClassNotFoundException ignored) {}
-			try {
-				return super.resolveClass(type);
-			} catch (ClassNotFoundException ex) {
-				throw new KryoException("Class not found: " + type.getName(), ex);
-			} catch (IOException ex) {
-				throw new KryoException("Could not load class: " + type.getName(), ex);
+				resolved = Class.forName(type.getName(), false, kryo.getClassLoader());
+			} catch (ClassNotFoundException ignored) {
+				try {
+					resolved = super.resolveClass(type);
+				} catch (ClassNotFoundException ex) {
+					throw new KryoException("Class not found: " + type.getName(), ex);
+				} catch (IOException ex) {
+					throw new KryoException("Could not load class: " + type.getName(), ex);
+				}
 			}
+			if (classFilter != null && !classFilter.test(resolved)) {
+				throw new KryoException("Deserialization is not allowed for class: " + type.getName());
+			}
+			return resolved;
 		}
 	}
 }
