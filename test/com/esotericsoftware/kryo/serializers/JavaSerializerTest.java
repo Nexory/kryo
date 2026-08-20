@@ -25,6 +25,8 @@ import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
 
 import java.io.Serializable;
+import java.util.List;
+import java.util.ArrayList;
 import java.net.URL;
 import java.net.URLClassLoader;
 
@@ -32,6 +34,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** @author Nathan Sweet */
 class JavaSerializerTest extends KryoTestCase {
@@ -64,7 +67,7 @@ class JavaSerializerTest extends KryoTestCase {
 	@Test
 	void testClassFilterRejectsDisallowedClass () {
 		JavaSerializer serializer = new JavaSerializer();
-		serializer.setClassFilter(type -> type != TestClass.class);
+		serializer.setClassFilter(name -> !name.equals(TestClass.class.getName()));
 		kryo.register(TestClass.class, serializer);
 
 		TestClass test = new TestClass();
@@ -81,7 +84,7 @@ class JavaSerializerTest extends KryoTestCase {
 	@Test
 	void testClassFilterAllowsClass () {
 		JavaSerializer serializer = new JavaSerializer();
-		serializer.setClassFilter(type -> true);
+		serializer.setClassFilter(name -> true);
 		kryo.register(TestClass.class, serializer);
 
 		TestClass test = new TestClass();
@@ -93,6 +96,30 @@ class JavaSerializerTest extends KryoTestCase {
 
 		Input input = new Input(output.toBytes());
 		assertEquals(test, kryo.readObject(input, TestClass.class));
+	}
+
+	@Test
+	void testClassFilterSeesTheClassName () {
+		List<String> seen = new ArrayList<>();
+		JavaSerializer serializer = new JavaSerializer();
+		serializer.setClassFilter(name -> {
+			seen.add(name);
+			return true;
+		});
+		kryo.register(TestClass.class, serializer);
+
+		TestClass test = new TestClass();
+		test.stringField = "fubar";
+		test.intField = 54321;
+
+		Output output = new Output(1024, -1);
+		kryo.writeObject(output, test);
+
+		Input input = new Input(output.toBytes());
+		assertEquals(test, kryo.readObject(input, TestClass.class));
+		// The filter runs on the name before the class is resolved, so a caller can refuse a class
+		// without it being loaded, and can refuse a name that would not resolve at all.
+		assertTrue(seen.contains(TestClass.class.getName()));
 	}
 
 	public static class TestClass implements Serializable {
